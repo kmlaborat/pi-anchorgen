@@ -1,0 +1,27 @@
+{
+  "name": "pi-anchorgen",
+  "version": "0.1.0",
+  "description": "Generate-and-apply editing for pi coding agent, powered by AnchorGen concepts and AnchorEdit.",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "main": "extensions/anchorgen/index.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
+  "pi": {
+    "skills": [
+      "./skills"
+    ],
+    "extensions": [
+      "./extensions/anchorgen"
+    ]
+  },
+  "dependencies": {
+    "typebox": "^1.2.19"
+  }
+}
