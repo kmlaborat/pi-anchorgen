@@ -16,7 +16,6 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { FastApplyGenerator } from "../../src/generators/fastApply";
 
@@ -149,20 +148,27 @@ export default function (pi: ExtensionAPI) {
       "anchor must be an exact byte sequence that appears exactly once in the file — typically the same as source.",
       "instruction is a natural language description of the desired change.",
     ],
-    parameters: Type.Object({
-      file: Type.String({ description: "Path to the file to edit" }),
-      anchor: Type.String({
-        description: "Exact text to match in the file (must be unique)",
-      }),
-      source: Type.String({
-        description: "Current content to transform (usually same as anchor)",
-      }),
-      instruction: Type.String({
-        description: "Natural language description of the desired change",
-      }),
-    }),
+    parameters: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "Path to the file to edit" },
+        anchor: {
+          type: "string",
+          description: "Exact text to match in the file (must be unique)",
+        },
+        source: {
+          type: "string",
+          description: "Current content to transform (usually same as anchor)",
+        },
+        instruction: {
+          type: "string",
+          description: "Natural language description of the desired change",
+        },
+      },
+      required: ["file", "anchor", "source", "instruction"],
+    },
 
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params: { file: string; anchor: string; source: string; instruction: string }, signal, _onUpdate, ctx) {
       const generator = new FastApplyGenerator();
 
       // Generate the replacement
