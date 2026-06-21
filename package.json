@@ -6,17 +6,11 @@
     "pi-package"
   ],
   "license": "MIT",
-  "main": "extensions/anchorgen/index.ts",
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  },
-   "pi": {
+  "pi": {
     "skills": [
       "./skills"
     ],
     "extensions": [
       "./extensions/anchorgen"
     ]
-  },
-  "dependencies": {}
-}
+ }
