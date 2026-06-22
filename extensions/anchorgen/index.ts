@@ -181,13 +181,15 @@ export default function (pi: ExtensionAPI) {
       const anchoreditBin = getAnchorEditBin();
 
       return withFileMutationQueue(filePath, async () => {
-        const nativePath = toNativePath(filePath);
-        const nativeBin = toNativePath(anchoreditBin);
+        const posixPath = toNativePath(filePath);
 
-        const result = spawnSync(nativeBin, [
+        // anchoredit accepts both POSIX and Windows paths for --file argument.
+        // Node.js spawnSync requires Windows native paths for the binary on Windows.
+        // anchoreditBin is kept as Windows path, posixPath is used for the --file argument.
+        const result = spawnSync(anchoreditBin, [
           "apply",
           "--file",
-          nativePath,
+          posixPath,
           "--anchor",
           params.anchor,
           "--replacement",
