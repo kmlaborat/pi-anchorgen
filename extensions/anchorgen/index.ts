@@ -12,9 +12,10 @@
  *   File updated
  */
 
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as path from "node:path";
+import { existsSync } from "node:fs";
+import { resolve, isAbsolute as pathIsAbsolute } from "node:path";
+import { execSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { FastApplyGenerator } from "../../src/generators/fastApply";
@@ -24,109 +25,63 @@ import { FastApplyGenerator } from "../../src/generators/fastApply";
 // ============================================================================
 
 /**
- * Resolve a file path relative to the working directory.
- * Handles both absolute and relative paths.
+ * Resolve the anchoredit binary path.
  */
-function resolveFilePath(fileParam: string, cwd: string): string {
-  if (path.isAbsolute(fileParam)) {
-    return fileParam;
-  }
-  return path.resolve(cwd, fileParam);
+function getAnchorEditBin(): string {
+  return process.env.ANCHOREDIT_BIN ?? "anchoredit";
 }
 
 /**
- * On Windows, convert a native Windows path to a format usable by
- * the anchoredit binary. If cygpath is available, use it to convert
- * to a POSIX-style path (for WSL/Git Bash built binaries).
+ * Normalize a file path for the native anchoredit binary.
  *
- * This handles the case where anchoredit was built in a WSL or MSYS2
- * environment and expects POSIX paths.
+ * On Windows, paths like "/tmp/file.rs" (Git Bash / Cygwin / MSYS2 mount style)
+ * are not understood by native Windows binaries. Node.js treats "/tmp/..."
+ * as "C:\\tmp\\..." which is a different location from the bash-mount temp dir.
+ *
+ * Strategy:
+ * 1. If it looks like a Windows absolute path (C:\\...), pass through.
+ * 2. If it starts with "/", try `cygpath -w` to translate the mount prefix
+ *    (e.g. /tmp → C:\Users\...\AppData\Local\Temp).
+ * 3. Otherwise treat it as a relative path and resolve against cwd.
+ * 4. In all cases verify with existsSync; fall back to the original path
+ *    so anchoredit can surface its own error message.
  */
-function toNativePath(filePath: string): string {
-  if (process.platform !== "win32") {
+function resolveFilePath(filePath: string, cwd: string): string {
+  // Windows absolute path (e.g. C:\foo\bar.rs) — pass through
+  if (pathIsAbsolute(filePath) && /^[a-zA-Z]:\\/.test(filePath)) {
     return filePath;
   }
 
-  // Try cygpath first (works for Git Bash, MSYS2, Cygwin)
-  const cygResult = spawnSync("cygpath", ["-u", filePath], {
-    encoding: "utf-8",
-    shell: false,
-  });
-  if (cygResult.status === 0 && cygResult.stdout.trim()) {
-    return cygResult.stdout.trim();
+  let resolved: string;
+
+  // Looks like a Unix-style absolute path (/tmp/..., /home/..., etc.)
+  if (filePath.startsWith("/")) {
+    try {
+      // Use cygpath -w to translate mount-aware paths to Windows native format.
+      // Available in Git Bash, MSYS2, Cygwin environments on Windows.
+      const shellPath: string = process.env.ComSpec ?? "/bin/sh";
+      resolved = execSync(
+        "cygpath -w '" + filePath.replace(/'/g, "'\"'\"'") + "'",
+        { shell: shellPath },
+      )
+        .toString()
+        .trim();
+    } catch {
+      // cygpath not available — fall through to relative resolution
+      resolved = resolve(cwd, filePath);
+    }
+  } else {
+    // Relative path — resolve against cwd
+    resolved = resolve(cwd, filePath);
   }
 
-  // Fallback: use Windows path as-is (works for native Windows builds)
+  // Verify the file exists at the resolved location
+  if (existsSync(resolved)) {
+    return resolved;
+  }
+
+  // Fall back to the original path so anchoredit can report its own error
   return filePath;
-}
-
-// ============================================================================
-// AnchorEdit Binary Resolution
-// ============================================================================
-
-const KNOWN_BIN_NAMES = ["anchoredit.exe", "anchoredit"];
-
-/**
- * Locate the anchoredit binary.
- *
- * Search order:
- * 1. ANCHOREDIT_BIN env var (explicit override)
- * 2. PATH lookup (spawnSync("anchoredit", ...) would work)
- * 3. Known build output locations relative to workspace
- */
-function getAnchorEditBin(): string {
-  // 1. Explicit env var
-  const envBin = process.env.ANCHOREDIT_BIN;
-  if (envBin) {
-    if (fs.existsSync(envBin)) {
-      return envBin;
-    }
-    // If env var is a directory, look inside
-    if (fs.existsSync(envBin) && fs.statSync(envBin).isDirectory()) {
-      for (const name of KNOWN_BIN_NAMES) {
-        const candidate = path.join(envBin, name);
-        if (fs.existsSync(candidate)) {
-          return candidate;
-        }
-      }
-    }
-    throw new Error(`ANCHOREDIT_BIN points to non-existent path: ${envBin}`);
-  }
-
-  // 2. Check PATH by trying to spawn
-  for (const name of KNOWN_BIN_NAMES) {
-    const result = spawnSync("where", [name], {
-      encoding: "utf-8",
-      shell: false,
-    });
-    if (result.status === 0 && result.stdout.trim()) {
-      return result.stdout.trim().split("\n")[0];
-    }
-  }
-
-  // 3. Search known locations relative to workspace
-  const searchDirs = [
-    // AnchorEdit target/release (same workspace)
-    path.join(__dirname, "..", "..", "..", "AnchorEdit", "target", "release"),
-    path.join(__dirname, "..", "..", "..", "AnchorEdit", "target", "debug"),
-    // Common workspace patterns
-    path.join(process.cwd(), "..", "AnchorEdit", "target", "release"),
-    path.join(process.cwd(), "..", "AnchorEdit", "target", "debug"),
-  ];
-
-  for (const dir of searchDirs) {
-    for (const name of KNOWN_BIN_NAMES) {
-      const candidate = path.join(dir, name);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  throw new Error(
-    "anchoredit binary not found. Set ANCHOREDIT_BIN env var or ensure anchoredit is in PATH. " +
-    "See https://github.com/kmlaborat/AnchorEdit for installation.",
-  );
 }
 
 // ============================================================================
@@ -181,34 +136,27 @@ export default function (pi: ExtensionAPI) {
       const anchoreditBin = getAnchorEditBin();
 
       return withFileMutationQueue(filePath, async () => {
-        const posixPath = toNativePath(filePath);
+        const result = await pi.exec(
+          anchoreditBin,
+          ["apply", "--file", filePath, "--anchor", params.anchor, "--replacement", output.result],
+          { signal },
+        );
 
-        // anchoredit accepts both POSIX and Windows paths for --file argument.
-        // Node.js spawnSync requires Windows native paths for the binary on Windows.
-        // anchoreditBin is kept as Windows path, posixPath is used for the --file argument.
-        const result = spawnSync(anchoreditBin, [
-          "apply",
-          "--file",
-          posixPath,
-          "--anchor",
-          params.anchor,
-          "--replacement",
-          output.result,
-        ], {
-          encoding: "utf-8",
-          shell: false,
-          signal,
-          timeout: 30000,
-        });
-
-        if (result.status !== 0) {
-          const errMsg = result.stderr || result.stdout || "anchoredit apply failed";
-          throw new Error(errMsg.trim());
+        if (result.code !== 0) {
+          const output = result.stderr || result.stdout || "";
+          if (output.includes("NO_MATCH")) {
+            throw new Error(`anchoredit_apply: NO_MATCH — the anchor was not found in the file`);
+          }
+          if (output.includes("MULTIPLE_MATCHES")) {
+            throw new Error(
+              `anchoredit_apply: MULTIPLE_MATCHES — the anchor matched more than once. Use a more specific anchor.`,
+            );
+          }
+          throw new Error(`anchoredit_apply failed (exit ${result.code}): ${output.trim()}`);
         }
 
         return {
-          content: [{ type: "text", text: (result.stdout || "").trim() }],
-          details: {},
+          content: [{ type: "text", text: result.stdout.trim() }],
         };
       });
     },
