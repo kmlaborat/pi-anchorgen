@@ -13,4 +13,5 @@
     "extensions": [
       "./extensions/anchorgen"
     ]
- }
+  }
+}
